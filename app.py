@@ -4,16 +4,17 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 st.title("🔗 Interlinking Suggestion Agent")
-st.write("Upload a CSV with columns: URL, Title, H1, H2, H3")
+st.write("Upload a CSV with columns like: Title, H1, H2, H3 (any combination works)")
 
 uploaded_file = st.file_uploader("Upload CSV", type="csv")
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df.fillna("", inplace=True)
-    available_columns = [col for col in ['Title', 'H1', 'H2', 'H3'] if col in df.columns]
-df['text'] = df[available_columns].agg(' '.join, axis=1)
 
+    # Safely handle missing columns
+    available_columns = [col for col in ['Title', 'H1', 'H2', 'H3'] if col in df.columns]
+    df['text'] = df[available_columns].agg(' '.join, axis=1)
 
     model = SentenceTransformer('all-MiniLM-L6-v2')
     embeddings = model.encode(df['text'].tolist(), show_progress_bar=True)
