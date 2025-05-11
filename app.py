@@ -11,7 +11,9 @@ uploaded_file = st.file_uploader("Upload CSV", type="csv")
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
     df.fillna("", inplace=True)
-    df['text'] = df[['Title', 'H1', 'H2', 'H3']].agg(' '.join, axis=1)
+    available_columns = [col for col in ['Title', 'H1', 'H2', 'H3'] if col in df.columns]
+df['text'] = df[available_columns].agg(' '.join, axis=1)
+
 
     model = SentenceTransformer('all-MiniLM-L6-v2')
     embeddings = model.encode(df['text'].tolist(), show_progress_bar=True)
