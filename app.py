@@ -23,7 +23,7 @@ You are an SEO agent suggesting internal links. Based on the following source ex
 2. An improved sentence in which this anchor can be naturally inserted.
 
 Source Excerpt:
-\"\"\"{source_excerpt}\"\"\"
+"""{source_excerpt}"""
 
 Destination Title: "{target_title}"
 Destination URL: {target_url}
@@ -109,11 +109,13 @@ if start_button and url_input:
     suggestions = []
 
     async def run_llm_tasks():
-        sem = Semaphore(10)  # limit concurrency to avoid rate limits
+        sem = Semaphore(10)
         async with aiohttp.ClientSession() as session:
             tasks = []
+            task_to_meta = {}
             total = len(df) * num_suggestions
             counter = 0
+
             for idx, row in df.iterrows():
                 sims = cosine_similarity([embeddings[idx]], embeddings)[0]
                 sorted_sims = sorted(enumerate(sims), key=lambda x: x[1], reverse=True)
@@ -125,21 +127,22 @@ if start_button and url_input:
                     target_title = df.loc[i, 'Title']
                     target_url = df.loc[i, 'URL']
                     source_url = df.loc[idx, 'URL']
+                    score = round(score, 3)
 
-                    tasks.append((session, sem, source_excerpt, target_title, target_url, source_url, target_url, round(score, 3)))
+                    coro = get_anchor_text_async(session, sem, source_excerpt, target_title, target_url)
+                    task = asyncio.create_task(coro)
+                    task_to_meta[task] = (source_url, target_url, score)
                     count += 1
 
-            for i, batch in enumerate(asyncio.as_completed([
-                get_anchor_text_async(t[0], t[1], t[2], t[3], t[4]) for t in tasks
-            ])):
-                llm_result = await batch
-                meta = tasks[i]
+            for task in asyncio.as_completed(task_to_meta):
+                llm_result = await task
+                source_url, target_url, score = task_to_meta[task]
                 anchor = re.search(r"Anchor Text:\s*(.+)", llm_result)
                 sentence = re.search(r"Suggested Sentence:\s*(.+)", llm_result)
                 suggestions.append({
-                    "Source URL": meta[5],
-                    "Target URL": meta[6],
-                    "Similarity Score": meta[7],
+                    "Source URL": source_url,
+                    "Target URL": target_url,
+                    "Similarity Score": score,
                     "Anchor Text": anchor.group(1).strip() if anchor else "—",
                     "Suggested Sentence": sentence.group(1).strip() if sentence else "—"
                 })
