@@ -129,7 +129,9 @@ if start_button and url_input:
                     tasks.append((session, sem, source_excerpt, target_title, target_url, source_url, target_url, round(score, 3)))
                     count += 1
 
-            for i, batch in enumerate(asyncio.as_completed([get_anchor_text_async(*t[:3]) for t in tasks])):
+            for i, batch in enumerate(asyncio.as_completed([
+                get_anchor_text_async(t[0], t[1], t[2], t[3], t[4]) for t in tasks
+            ])):
                 llm_result = await batch
                 meta = tasks[i]
                 anchor = re.search(r"Anchor Text:\s*(.+)", llm_result)
