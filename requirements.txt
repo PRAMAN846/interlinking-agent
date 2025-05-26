@@ -1,9 +1,11 @@
 streamlit
 pandas
+requests
+beautifulsoup4
+readability-lxml
 sentence-transformers
 scikit-learn
-requests
-readability-lxml
-beautifulsoup4
+aiohttp
 lxml
+
 
