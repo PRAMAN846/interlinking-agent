@@ -2,3 +2,8 @@ streamlit
 pandas
 sentence-transformers
 scikit-learn
+requests
+readability-lxml
+beautifulsoup4
+lxml
+
