@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from asyncio import Semaphore
 from sentence_transformers import SentenceTransformer, util
 from tqdm import tqdm
+from stqdm import stqdm
 
 # 🔐 Load API key from Streamlit Secrets
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
