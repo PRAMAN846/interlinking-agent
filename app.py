@@ -7,9 +7,10 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import os
 
+# 🔐 Load API key from Streamlit Secrets
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
-# LLM helper
+# 🔧 Together AI LLM Call
 def get_anchor_text_together_ai(source_excerpt, target_title, target_url):
     prompt = f"""
 You are an SEO agent. Based on the following source excerpt and the destination title, suggest a natural anchor text and a sentence where this link can be naturally inserted.
@@ -31,7 +32,7 @@ Suggested Sentence: <sentence>
             "Content-Type": "application/json"
         },
         json={
-            "model": "mistralai/Mixtral-8x7B-Instruct-v0.1",
+            "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": 200,
             "temperature": 0.7
@@ -40,9 +41,9 @@ Suggested Sentence: <sentence>
     if response.ok:
         return response.json()['choices'][0]['message']['content']
     else:
-        return f"⚠️ LLM failed: {response.status_code}"
+        return f"⚠️ LLM failed: {response.status_code} – {response.text}"
 
-# Crawl a single URL
+# 🌐 Fetch content from a URL
 def fetch_url_data(url):
     try:
         res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -70,8 +71,9 @@ def fetch_url_data(url):
             "Content": ""
         }
 
-# Streamlit UI
-st.title("🔗 Internal Linking Agent (with Auto-Extraction + LLM)")
+# 🧠 Streamlit Interface
+st.title("🔗 Internal Linking Suggestion Agent")
+st.write("Paste a list of URLs below. The app will fetch each page, extract content, and suggest internal links using an AI model.")
 
 url_input = st.text_area("Paste URLs (one per line)", height=200)
 start_button = st.button("Fetch Page Data")
@@ -88,13 +90,15 @@ if start_button and url_input:
         st.error("Could not fetch any content. Check your URLs or try again.")
         st.stop()
 
-    st.success("Content extracted from URLs ✅")
+    st.success("✅ Fetched & extracted content")
     st.dataframe(df[['URL', 'Title', 'H1']])
 
+    # Compute embeddings
     model = SentenceTransformer('all-MiniLM-L6-v2')
     df['text'] = df[['Title', 'H1', 'Content']].agg(' '.join, axis=1)
     embeddings = model.encode(df['text'].tolist(), show_progress_bar=True)
 
+    # Choose target URL
     url_titles = [f"{row['Title']} ({row['URL']})" for _, row in df.iterrows()]
     selected_title = st.selectbox("Select a URL to get interlinking suggestions:", url_titles)
     selected_index = url_titles.index(selected_title)
