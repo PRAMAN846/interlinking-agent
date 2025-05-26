@@ -6,19 +6,23 @@ from readability import Document
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import os
+import re
 
-# 🔐 Load API key from Streamlit Secrets
+# 🔐 Load Together AI key from environment
 TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
 
-# 🔧 Together AI LLM Call
+# 🔧 Call DeepSeek on Together AI to get anchor + sentence
 def get_anchor_text_together_ai(source_excerpt, target_title, target_url):
     prompt = f"""
-You are an SEO agent. Based on the following source excerpt and the destination title, suggest a natural anchor text and a sentence where this link can be naturally inserted.
+You are an SEO agent suggesting internal links. Based on the following source excerpt and the destination page title, suggest:
 
-Source Content:
+1. A natural anchor text that could be used to link to the destination page from the source context.
+2. An improved sentence in which this anchor can be naturally inserted.
+
+Source Excerpt:
 \"\"\"{source_excerpt}\"\"\"
 
-Destination Page Title: "{target_title}"
+Destination Title: "{target_title}"
 Destination URL: {target_url}
 
 Respond strictly in this format:
@@ -34,7 +38,7 @@ Suggested Sentence: <sentence>
         json={
             "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
             "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 200,
+            "max_tokens": 300,
             "temperature": 0.7
         }
     )
@@ -43,7 +47,7 @@ Suggested Sentence: <sentence>
     else:
         return f"⚠️ LLM failed: {response.status_code} – {response.text}"
 
-# 🌐 Fetch content from a URL
+# 🌐 Crawl URL and extract main content
 def fetch_url_data(url):
     try:
         res = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -62,7 +66,6 @@ def fetch_url_data(url):
             "H1": h1,
             "Content": readable_text
         }
-
     except Exception as e:
         return {
             "URL": url,
@@ -71,72 +74,81 @@ def fetch_url_data(url):
             "Content": ""
         }
 
-# 🧠 Streamlit Interface
-st.title("🔗 Internal Linking Suggestion Agent")
-st.write("Paste a list of URLs below. The app will fetch each page, extract content, and suggest internal links using an AI model.")
+# 🔍 Extract one meaningful sentence from body text
+def extract_representative_sentence(text):
+    sentences = re.split(r'(?<=[.!?]) +', text)
+    for s in sentences:
+        if 50 < len(s) < 300:  # Reasonable length
+            return s.strip()
+    return text[:300]  # fallback
+
+# 🚀 Streamlit App
+st.title("🔗 Internal Linking Suggestion Agent (Bulk, Auto, LLM)")
 
 url_input = st.text_area("Paste URLs (one per line)", height=200)
-start_button = st.button("Fetch Page Data")
+num_suggestions = st.slider("How many suggestions per page?", 1, 10, 3)
+start_button = st.button("🔍 Run Interlinking Agent")
 
 if start_button and url_input:
     urls = [u.strip() for u in url_input.splitlines() if u.strip()]
-    st.info(f"Fetching {len(urls)} URLs. Please wait...")
+    st.info(f"Fetching and processing {len(urls)} URLs...")
 
-    data = [fetch_url_data(url) for url in urls]
-    df = pd.DataFrame(data)
-    df = df[df['Content'] != ""]  # Remove failed URLs
+    raw_data = [fetch_url_data(url) for url in urls]
+    df = pd.DataFrame(raw_data)
+    df = df[df['Content'] != ""]
+    df.fillna("", inplace=True)
 
     if df.empty:
-        st.error("Could not fetch any content. Check your URLs or try again.")
+        st.error("None of the pages could be fetched or extracted.")
         st.stop()
 
-    st.success("✅ Fetched & extracted content")
+    st.success("✅ All pages crawled and content extracted.")
     st.dataframe(df[['URL', 'Title', 'H1']])
 
-    # Compute embeddings
-    model = SentenceTransformer('all-MiniLM-L6-v2')
     df['text'] = df[['Title', 'H1', 'Content']].agg(' '.join, axis=1)
+    model = SentenceTransformer('all-MiniLM-L6-v2')
     embeddings = model.encode(df['text'].tolist(), show_progress_bar=True)
 
-    # Choose target URL
-    url_titles = [f"{row['Title']} ({row['URL']})" for _, row in df.iterrows()]
-    selected_title = st.selectbox("Select a URL to get interlinking suggestions:", url_titles)
-    selected_index = url_titles.index(selected_title)
-    num_suggestions = st.slider("Number of suggestions", 1, 10, 3)
+    all_suggestions = []
 
-    if st.button("🔍 Get Suggestions"):
-        query_embedding = embeddings[selected_index].reshape(1, -1)
+    for idx, row in df.iterrows():
+        query_embedding = embeddings[idx].reshape(1, -1)
         sims = cosine_similarity(query_embedding, embeddings)[0]
         sim_scores = list(enumerate(sims))
         sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
 
-        st.markdown(f"### Top {num_suggestions} Suggestions for:")
-        st.markdown(f"**{df.loc[selected_index, 'Title']}** — {df.loc[selected_index, 'URL']}")
-
-        results = []
         count = 0
-
         for i, score in sim_scores:
-            if i == selected_index or count >= num_suggestions:
+            if i == idx or count >= num_suggestions:
                 continue
 
-            source_excerpt = df.loc[selected_index, 'Content'][:700]
+            source_excerpt = extract_representative_sentence(df.loc[idx, 'Content'])
             target_title = df.loc[i, 'Title']
             target_url = df.loc[i, 'URL']
+            source_url = df.loc[idx, 'URL']
 
             llm_response = get_anchor_text_together_ai(source_excerpt, target_title, target_url)
 
-            results.append({
-                "Source URL": df.loc[selected_index, 'URL'],
+            # Parse LLM response (simple version)
+            anchor_match = re.search(r"Anchor Text:\s*(.+)", llm_response)
+            sentence_match = re.search(r"Suggested Sentence:\s*(.+)", llm_response)
+
+            anchor_text = anchor_match.group(1).strip() if anchor_match else "—"
+            suggested_sentence = sentence_match.group(1).strip() if sentence_match else "—"
+
+            all_suggestions.append({
+                "Source URL": source_url,
                 "Target URL": target_url,
-                "Similarity Score": round(score, 3),
-                "LLM Suggestion": llm_response
+                "Anchor Text": anchor_text,
+                "Suggested Sentence": suggested_sentence,
+                "Similarity Score": round(score, 3)
             })
 
             count += 1
 
-        results_df = pd.DataFrame(results)
-        st.write(results_df)
+    result_df = pd.DataFrame(all_suggestions)
+    st.markdown("### 🔗 Internal Linking Suggestions")
+    st.dataframe(result_df)
 
-        csv = results_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Suggestions CSV", data=csv, file_name="interlinking_suggestions.csv", mime='text/csv')
+    csv = result_df.to_csv(index=False).encode('utf-8')
+    st.download_button("📥 Download Suggestions CSV", data=csv, file_name="internal_linking_suggestions.csv", mime='text/csv')
